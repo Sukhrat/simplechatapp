@@ -7,3 +7,17 @@
 //
 
 import Foundation
+
+class Channel {
+    
+    let name: String
+    let id: String
+    
+    init(name: String, id: String) {
+        
+        self.name = name
+        self.id = id
+        
+    }
+    
+}

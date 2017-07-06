@@ -7,3 +7,5 @@
 //
 
 import Foundation
+
+let BASE_URL = "https://simplechatapp-e845d.firebaseio.com/"
