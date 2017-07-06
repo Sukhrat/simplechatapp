@@ -43,6 +43,10 @@ final class ChannelVC: JSQMessagesViewController {
             userIsTypingRef.setValue(newValue)
         }
     }
+    
+    lazy var storageRef = FIRStorage.storage().reference(forURL: "gs://simplechatapp-e845d.appspot.com")
+    
+    private let imageURLNotSetKey = "NOTSET"
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -186,4 +190,104 @@ final class ChannelVC: JSQMessagesViewController {
             self.scrollToBottom(animated: true)
         }
     }
+    
+    //MARK: Handling images
+    func sendPhotoMessage() -> String? {
+        
+        let itemRef = messageRef.childByAutoId()
+        
+        let messageItem = [
+            "photoURL": imageURLNotSetKey,
+            "senderId": senderId!
+        ]
+        
+        itemRef.setValue(messageItem)
+        JSQSystemSoundPlayer.jsq_playMessageSentSound()
+        
+        finishSendingMessage()
+        return itemRef.key
+    }
+    
+    func setImageURL(_ url: String, forPhotoMessageWithKey key: String) {
+        let itemRef = messageRef.child(key)
+        itemRef.updateChildValues(["photoURL": url])
+    }
+    
+    override func didPressAccessoryButton(_ sender: UIButton!) {
+        let picker = UIImagePickerController()
+        picker.delegate = self as! UIImagePickerControllerDelegate & UINavigationControllerDelegate
+        
+        if (UIImagePickerController.isSourceTypeAvailable(UIImagePickerControllerSourceType.camera)) {
+            
+            picker.sourceType = UIImagePickerControllerSourceType.camera
+        } else {
+            picker.sourceType = UIImagePickerControllerSourceType.photoLibrary
+        }
+        
+        present(picker, animated: true, completion: nil)
+    }
+    
+    //MARK: ImagePicker delegate
+    
+}
+
+extension ChannelVC: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [String : Any]) {
+        picker.dismiss(animated: true, completion: nil)
+        
+        if let photoRefURL = info[UIImagePickerControllerReferenceURL] as? URL {
+            
+            let assets = PHAsset.fetchAssets(withALAssetURLs: [photoRefURL], options: nil)
+            let asset = assets.firstObject
+            
+            if let key = sendPhotoMessage() {
+                asset?.requestContentEditingInput(with: nil, completionHandler: { (contentEditingInput, info) in
+                    let imageFileURL = contentEditingInput?.fullSizeImageURL
+                    let path = "\(FIRAuth.auth()?.currentUser?.uid)/\(Int(Date.timeIntervalSinceReferenceDate * 1000))/\(photoRefURL.lastPathComponent)"
+                    
+                    self.storageRef.child(path).putFile(imageFileURL!, metadata: nil, completion: { (metadata, error) in
+                        if let error = error {
+                            
+                            let alertController = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
+                            let defaultAction = UIAlertAction(title: "OK", style: .cancel, handler: nil)
+                            alertController.addAction(defaultAction)
+                            
+                            self.present(alertController, animated: true, completion: nil)
+                            return
+                            
+                        }
+                        self.setImageURL(self.storageRef.child((metadata?.path)!).description, forPhotoMessageWithKey: key)
+                        
+                    })
+                })
+            } else {
+                //TODO: handle picking a photo from the camera
+                let image = info[UIImagePickerControllerOriginalImage] as! UIImage
+                
+                if let key = sendPhotoMessage() {
+                    let imageData = UIImageJPEGRepresentation(image, 1.0)
+                    let imagePath = FIRAuth.auth()!.currentUser!.uid + "/\(Int(Date.timeIntervalSinceReferenceDate * 1000)).jpg"
+                    
+                    let metadata = FIRStorageMetadata()
+                    metadata.contentType = "image/jpeg"
+                    
+                    storageRef.child(imagePath).putFile(URL(imageData!), metadata: metadata, completion: { (metadata, error) in
+                        if let error = error {
+                            let alertController = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
+                            let defaultAction = UIAlertAction(title: "OK", style: .cancel, handler: nil)
+                            alertController.addAction(defaultAction)
+                        }
+                        self.setImageURL(self.storageRef.child((metadata?.path)!).description, forPhotoMessageWithKey: key)
+                    })
+                }
+            }
+            
+        }
+    }
+    
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true, completion: nil)
+    }
+    
 }

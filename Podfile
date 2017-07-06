@@ -11,4 +11,5 @@ target 'SimpleChatApp' do
   pod 'Firebase/Auth'
   pod 'Firebase/Database'
   pod 'JSQMessagesViewController'
+  pod 'Firebase/Storage'
 end
