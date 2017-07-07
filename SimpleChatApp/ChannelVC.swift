@@ -32,6 +32,7 @@ final class ChannelVC: JSQMessagesViewController {
     private lazy var usersTypeQuery:FIRDatabaseQuery = self.channelRef!.child("typingIndicator").queryOrderedByValue().queryEqual(toValue: true)
     
     private var _isTyping = false
+    private var photoMessageMap = [String: JSQPhotoMediaItem]()
     
     var isTyping: Bool {
         
@@ -47,6 +48,7 @@ final class ChannelVC: JSQMessagesViewController {
     lazy var storageRef = FIRStorage.storage().reference(forURL: "gs://simplechatapp-e845d.appspot.com")
     
     private let imageURLNotSetKey = "NOTSET"
+    private var updatedMessageRefHandle: FIRDatabaseHandle?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -162,9 +164,29 @@ final class ChannelVC: JSQMessagesViewController {
                self.addMessage(withId: id, name: name, text: text)
                 
                 self.finishReceivingMessage()
-            } else {
+            } else if let id = messageData["senderId"] as String!, let photoURL = messageData["photoURL"] as String! {
+                if let mediaItem = JSQPhotoMediaItem(maskAsOutgoing: id == self.senderId) {
+                    self.addPhotoMessage(withId: id, key: snapshot.key, mediaItem: mediaItem)
+                    
+                    if photoURL.hasPrefix("gs://") {
+                        self.fetchImageAtUrl(photoURL, forMediaItem: mediaItem, clearsPhotoMessageMapOnSuccessForKey: nil)                    }
+                }
+                
+            }
+            else {
                 
                 print("Could not decode any message data")
+            }
+        })
+        
+        updatedMessageRefHandle = messageRef.observe(.childChanged, with: { (snapshot) in
+            let key = snapshot.key
+            let messageData = snapshot.value as! Dictionary<String, String>
+            
+            if let photoUrl = messageData["photoURL"] as String! {
+                if let mediaItem = self.photoMessageMap[key] { // 3
+                    self.fetchImageAtUrl(photoUrl, forMediaItem: mediaItem, clearsPhotoMessageMapOnSuccessForKey: key)
+                }
             }
         })
     }
@@ -227,8 +249,70 @@ final class ChannelVC: JSQMessagesViewController {
         present(picker, animated: true, completion: nil)
     }
     
-    //MARK: ImagePicker delegate
+    private func addPhotoMessage(withId id: String, key: String, mediaItem: JSQPhotoMediaItem) {
+        
+        if let message = JSQMessage(senderId: id, displayName: "", media: mediaItem) {
+            
+            messages.append(message)
+            
+            if (mediaItem.image == nil) {
+                photoMessageMap[key] = mediaItem
+            }
+            
+            collectionView.reloadData()
+        }
+    }
     
+    private func fetchImageAtUrl(_ photoUrl: String, forMediaItem mediaItem: JSQPhotoMediaItem, clearsPhotoMessageMapOnSuccessForKey key: String?) {
+        
+        let storageRef = FIRStorage.storage().reference(forURL: photoUrl)
+        storageRef.data(withMaxSize: INT64_MAX) { (data, error) in
+            if let error = error {
+                let alertController = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
+                let defaultAction = UIAlertAction(title: "OK", style: .cancel, handler: nil)
+                alertController.addAction(defaultAction)
+                
+                self.present(alertController, animated: true, completion: nil)
+                return
+            }
+            
+            storageRef.metadata(completion: { (metadata, metaError) in
+                if let error = metaError {
+                    
+                    let alertController = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
+                    let defaultAction = UIAlertAction(title: "OK", style: .cancel, handler: nil)
+                    alertController.addAction(defaultAction)
+                    
+                    self.present(alertController, animated: true, completion: nil)
+                    return
+                    
+                }
+                
+                if metadata?.contentType == "image/gif" {
+                  //  mediaItem.image = UIImage.gif(data!)
+                    print(" gif image")
+                } else {
+                    mediaItem.image = UIImage.init(data:data!)
+                }
+                self.collectionView.reloadData()
+                
+                guard key != nil else {
+                    return
+                }
+                self.photoMessageMap.removeValue(forKey: key!)
+            })
+        }
+        
+    }
+    deinit {
+        if let refHandle = newMessageRefHandle {
+            messageRef.removeObserver(withHandle: refHandle)
+        }
+        
+        if let refHandle = updatedMessageRefHandle {
+            messageRef.removeObserver(withHandle: refHandle)
+        }
+    }
 }
 
 extension ChannelVC: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
@@ -272,7 +356,9 @@ extension ChannelVC: UIImagePickerControllerDelegate, UINavigationControllerDele
                     let metadata = FIRStorageMetadata()
                     metadata.contentType = "image/jpeg"
                     
-                    storageRef.child(imagePath).putFile(URL(imageData!), metadata: metadata, completion: { (metadata, error) in
+                    
+                    let urlString = String(describing: imageData!)
+                    storageRef.child(imagePath).putFile(URL(string: urlString)!, metadata: metadata, completion: { (metadata, error) in
                         if let error = error {
                             let alertController = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
                             let defaultAction = UIAlertAction(title: "OK", style: .cancel, handler: nil)

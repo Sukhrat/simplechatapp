@@ -36,5 +36,7 @@
 	</array>
 	<key>FirebaseAppDelegateProxyEnabled</key>
 	<false/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Give me access to your photos, bro</string>
 </dict>
 </plist>
